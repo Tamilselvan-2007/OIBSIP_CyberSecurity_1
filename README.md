@@ -24,7 +24,7 @@ Perform a network scan on a local machine to:
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Nmap | 7.x | Network port scanning and service detection |
+| Nmap | 7.99 | Network port scanning and service detection |
 | Terminal / CMD | — | Executing scan commands |
 
 ---
@@ -68,82 +68,72 @@ Saves all output in normal format to `nmap_scan_results.txt` for documentation a
 ## Scan Results
 
 > **Target:** `127.0.0.1` (localhost)  
-> **Scan Type:** Service Version Detection (`-sV`)  
-> **Host Status:** Up
+> **Scan Type:** Basic scan + Service Version Detection (`-sV`)  
+> **Nmap Version:** 7.99  
+> **Host Status:** Up (0.00038s latency)  
+> **OS Detected:** Windows (CPE: `cpe:/o:microsoft:windows`)  
+> **Scan Date:** 2026-06-09  
+> **Closed Ports:** 997 (reset)
 
-The scan identified the following open ports:
+The scan identified the following **3 open ports** out of 1000 scanned:
 
 | Port | State | Protocol | Service | Version |
 |------|-------|----------|---------|---------|
-| 22 | Open | TCP | SSH | OpenSSH 8.x |
-| 80 | Open | TCP | HTTP | Apache httpd 2.x |
-| 443 | Open | TCP | HTTPS | Apache httpd 2.x (SSL) |
-| 3306 | Open | TCP | MySQL | MySQL 8.x |
-
-> **Note:** Actual versions and additional ports may vary based on the system environment. Replace the above with your real scan output.
+| 135 | Open | TCP | msrpc | Microsoft Windows RPC |
+| 445 | Open | TCP | microsoft-ds | Windows SMB (version undetected) |
+| 3306 | Open | TCP | mysql | MySQL 8.0.41 |
 
 ---
 
 ## Port Analysis & Security Significance
 
-### Port 22 — SSH (Secure Shell)
+### Port 135 — MSRPC (Microsoft Remote Procedure Call)
 
-**What it is:** SSH is a cryptographic network protocol used for secure remote login, command execution, and file transfer between machines.
+**What it is:** MSRPC is a Windows protocol that allows programs to request services from other programs on the network. It acts as an endpoint mapper — when a client wants to communicate with an RPC service, it first contacts port 135 to find out which dynamic port the service is listening on.
 
-**Why it is open:** A remote access server or administrative tool is running on this machine.
+**Why it is open:** This is a default Windows system service that starts automatically. It supports core Windows features like DCOM (Distributed Component Object Model), WMI (Windows Management Instrumentation), and remote service management.
 
 **Security Implications:**
-- SSH is a common brute-force target; weak or default passwords are a major risk.
-- Leaving SSH open on the default port (22) exposes the service to automated scanning bots.
-- **Best practices:** Disable root login, use key-based authentication, consider changing to a non-standard port, and use `fail2ban` to block repeated failed attempts.
+- Port 135 has historically been targeted by major worms such as **Blaster (MS03-026)** and **Conficker**, which exploited RPC vulnerabilities for remote code execution.
+- Exposing port 135 on a network allows attackers to enumerate RPC endpoints and identify exploitable services.
+- **Best practices:** Block port 135 at the firewall for all external and untrusted interfaces. On internal networks, apply the latest Windows security patches. Disable unnecessary DCOM services via `dcomcnfg`.
 
 ---
 
-### Port 80 — HTTP (Hypertext Transfer Protocol)
+### Port 445 — Microsoft-DS (SMB — Server Message Block)
 
-**What it is:** HTTP is the foundational protocol for data communication on the web. Port 80 indicates a web server is running and serving unencrypted web content.
+**What it is:** Port 445 is used by Windows SMB (Server Message Block) protocol for file sharing, printer sharing, and inter-process communication over a network. It is the modern replacement for the older NetBIOS-based file sharing (ports 137–139).
 
-**Why it is open:** A web server (e.g., Apache, Nginx) is active on this machine.
+**Why it is open:** Windows enables SMB by default for network file and printer sharing. Even on standalone machines, SMB is active for local inter-process communication and administrative shares.
 
 **Security Implications:**
-- HTTP transmits data in **plain text**, making it vulnerable to man-in-the-middle (MITM) attacks and packet sniffing.
-- Sensitive login pages or forms running over HTTP expose user credentials.
-- **Best practices:** Redirect all HTTP traffic to HTTPS (port 443), implement HTTP Strict Transport Security (HSTS), and keep the web server software updated.
+- Port 445 was the primary attack vector for the **WannaCry ransomware (2017)** and **NotPetya**, which used the EternalBlue exploit (MS17-010) against unpatched SMB implementations.
+- Exposed SMB allows **credential relay attacks** (NTLM relay), **pass-the-hash** attacks, and **brute-force of Windows credentials**.
+- SMB version 1 (SMBv1) is critically insecure and should never be used.
+- **Best practices:** Block port 445 at the perimeter firewall — it should never be exposed to the internet. Disable SMBv1 via PowerShell: `Set-SmbServerConfiguration -EnableSMB1Protocol $false`. Enable SMB signing to prevent relay attacks.
 
 ---
 
-### Port 443 — HTTPS (HTTP Secure)
+### Port 3306 — MySQL 8.0.41 (Database Server)
 
-**What it is:** HTTPS is the encrypted version of HTTP, secured using TLS/SSL certificates. It ensures that data between the client and server is encrypted and authenticated.
+**What it is:** Port 3306 is the default port for MySQL, a widely used open-source relational database management system (RDBMS). The scan confirmed **MySQL version 8.0.41** is running on this machine.
 
-**Why it is open:** A secure web server is running, serving content over an encrypted channel.
-
-**Security Implications:**
-- An outdated or misconfigured TLS certificate can introduce vulnerabilities (e.g., expired certificates, weak cipher suites like SSLv3/TLS 1.0).
-- Self-signed certificates can expose users to phishing.
-- **Best practices:** Use TLS 1.2 or 1.3 only, disable older SSL/TLS versions, and regularly renew certificates. Use tools like SSL Labs to audit the TLS configuration.
-
----
-
-### Port 3306 — MySQL (Database Server)
-
-**What it is:** Port 3306 is the default port for MySQL, a widely used relational database management system (RDBMS).
-
-**Why it is open:** A MySQL database server is actively running on this machine.
+**Why it is open:** MySQL is installed and running — likely supporting a local web application, development environment, or backend service.
 
 **Security Implications:**
-- An externally exposed MySQL port is a **critical risk** — attackers can attempt to brute-force database credentials directly.
-- SQL injection attacks combined with an exposed MySQL port can lead to complete data exfiltration.
-- **Best practices:** Bind MySQL to `127.0.0.1` (localhost only) so it is not accessible from outside the machine. Use strong passwords, restrict user privileges to least-privilege, and disable the root account for remote login.
+- An externally accessible MySQL port is a **critical risk** — attackers can directly brute-force database credentials or exploit version-specific CVEs.
+- MySQL 8.0.41 should be checked against the [CVE database](https://cve.mitre.org/) for any known vulnerabilities in that specific version.
+- Exposing the database port means SQL injection vulnerabilities in the application could give attackers direct database access.
+- **Best practices:** Bind MySQL strictly to localhost by setting `bind-address = 127.0.0.1` in `my.ini`. Use strong, unique passwords for all database users. Restrict user privileges to only what is needed (principle of least privilege). Disable remote root login. Keep MySQL updated to the latest patch release.
 
 ---
 
 ## Key Takeaways
 
 1. **Every open port is a potential entry point.** Only necessary services should be running and exposed.
-2. **Service version information** (from `-sV`) is critical — outdated versions often have known CVEs.
-3. **Default ports** (22, 80, 443, 3306) are actively targeted by automated scanners and bots.
-4. **Principle of Least Exposure:** Close or firewall any port that does not need to be publicly accessible.
+2. **Port 445 (SMB) is a high-risk port** — it was the attack vector for WannaCry and NotPetya; it must be firewalled from external networks.
+3. **Port 135 (MSRPC)** has a history of critical RPC exploits and should never be exposed beyond trusted internal networks.
+4. **Service version information** (from `-sV`) is critical — MySQL 8.0.41 can be cross-referenced against CVE databases to check for known vulnerabilities.
 5. **Network scanning is the first step** in any penetration test or security audit — knowing what is exposed is fundamental to defending it.
 
 ---
